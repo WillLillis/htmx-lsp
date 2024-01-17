@@ -9,8 +9,9 @@ use htmx::HxCompletion;
 use log::{debug, error, info, warn};
 use lsp_types::{
     CompletionItem, CompletionItemKind, CompletionList, HoverContents, InitializeParams,
-    MarkupContent, PositionEncodingKind, ServerCapabilities, TextDocumentSyncCapability,
-    TextDocumentSyncKind, WorkDoneProgressOptions,
+    LanguageString, MarkedString, MarkupContent, PositionEncodingKind, PositionEncodingKind,
+    ServerCapabilities, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextDocumentSyncKind, WorkDoneProgressOptions, WorkDoneProgressOptions,
 };
 
 use lsp_server::{Connection, Message, Response};
