@@ -29,8 +29,12 @@ macro_rules! build_completion {
 
 pub fn hx_completion(text_params: TextDocumentPositionParams) -> Option<&'static [HxCompletion]> {
     let result = crate::tree_sitter::get_position_from_lsp_completion(text_params.clone())?;
+    let ext_result = crate::tree_sitter::get_extension_completes(text_params.clone());
 
-    debug!("result: {:?} params: {:?}", result, text_params);
+    debug!(
+        "result: {:?} ext_result: {:?} params: {:?}",
+        result, ext_result, text_params
+    );
 
     match result {
         Position::AttributeName(name) => name.starts_with("hx-").then_some(HX_TAGS),

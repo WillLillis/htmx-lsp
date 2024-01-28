@@ -1,11 +1,15 @@
+use std::collections::HashSet;
+
 use crate::{
     text_store::DOCUMENT_STORE,
+    tree_sitter,
     tree_sitter_querier::{query_attr_keys_for_completion, query_attr_values_for_completion},
 };
+use ::tree_sitter::{InputEdit, Node, Point, Query, QueryCursor};
 use log::{debug, error};
 use lsp_textdocument::FullTextDocument;
 use lsp_types::{TextDocumentContentChangeEvent, TextDocumentPositionParams};
-use tree_sitter::{InputEdit, Node, Point};
+use once_cell::sync::Lazy;
 
 use crate::text_store::get_text_document;
 
@@ -143,6 +147,102 @@ pub fn get_position_from_lsp_completion(
     }
 
     None
+}
+
+macro_rules! cursor_matches {
+    ($cursor_line:expr,$cursor_char:expr,$query_start:expr,$query_end:expr) => {{
+        $query_start.row == $cursor_line
+            && $query_end.row == $cursor_line
+            && $query_start.column <= $cursor_char
+            && $query_end.column >= $cursor_char
+    }};
+}
+
+/// Returns a (potentially empty) Vec of extension tags the provided position is inside of
+// Currently limited by tree-sitter's max depth of 12 levels, see https://github.com/tree-sitter/tree-sitter/issues/880
+pub fn get_extension_completes(text_params: TextDocumentPositionParams) -> Vec<String> {
+    static QUERY_HTMX_EXT: Lazy<Query> = Lazy::new(|| {
+        tree_sitter::Query::new(
+            tree_sitter_html::language(),
+            r#"
+(
+	(element
+        (start_tag
+            (attribute
+                (attribute_name) @hxext
+                (quoted_attribute_value
+                    (attribute_value) @extension
+                )
+            ) 
+            (attribute (attribute_name) @tag )?
+        )
+        (element
+            [
+            	(_ (attribute (attribute_name) @tag ))
+                (_ (_ (attribute (attribute_name) @tag )))
+                (_ (_ (_ (attribute (attribute_name) @tag ))))
+                (_ (_ (_ (_ (attribute (attribute_name) @tag )))))
+                (_ (_ (_ (_ (_ (attribute (attribute_name) @tag ))))))
+                (_ (_ (_ (_ (_ (_ (attribute (attribute_name) @tag )))))))
+                (_ (_ (_ (_ (_ (_ (_ (attribute (attribute_name) @tag ))))))))
+                (_ (_ (_ (_ (_ (_ (_ (_ (attribute (attribute_name) @tag )))))))))
+                (_ (_ (_ (_ (_ (_ (_ (_ (_ (attribute (attribute_name) @tag ))))))))))
+                (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (attribute (attribute_name) @tag )))))))))))
+                (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (attribute (attribute_name) @tag ))))))))))))
+                (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (attribute (attribute_name) @tag )))))))))))))
+            ]
+        )
+    ) @elem
+(#match? @hxext "hx-ext")
+)"#,
+        )
+        .unwrap()
+    });
+
+    let mut ext_tags: HashSet<String> = HashSet::new();
+    let mut cursor = QueryCursor::new();
+    let cursor_line = text_params.position.line as usize;
+    let cursor_char = text_params.position.character as usize;
+
+    if let Some(entry) = DOCUMENT_STORE
+        .get()
+        .expect("text store not initialized")
+        .lock()
+        .expect("text store mutex poisoned")
+        .get_mut(text_params.text_document.uri.as_str())
+    {
+        entry.tree = entry
+            .parser
+            .parse(entry.doc.get_content(None), entry.tree.as_ref());
+
+        if let Some(ref curr_tree) = entry.tree {
+            let matches = cursor.matches(
+                &QUERY_HTMX_EXT,
+                curr_tree.root_node(),
+                entry.doc.get_content(None).as_bytes(),
+            );
+            for match_ in matches {
+                let caps = match_.captures;
+                let extension = caps[1]
+                    .node
+                    .utf8_text(entry.doc.get_content(None).as_bytes())
+                    .unwrap();
+
+                // skip @hxext and @extension, grab both @tag's if they're there
+                for cap in caps.iter().skip(2).take(2) {
+                    let cap_start = cap.node.range().start_point;
+                    let cap_end = cap.node.range().end_point;
+                    // if the cursor is current at a tag inside the extension's scope,
+                    // we need to add that extension's tags and attributes
+                    if cursor_matches!(cursor_line, cursor_char, cap_start, cap_end) {
+                        ext_tags.insert(extension.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    ext_tags.into_iter().collect()
 }
 
 /// Convert an `lsp_types::TextDocumentContentChangeEvent` to a `tree_sitter::InputEdit`
