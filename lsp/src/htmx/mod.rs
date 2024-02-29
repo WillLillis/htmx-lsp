@@ -1,4 +1,4 @@
-use log::debug;
+use log::{debug, error};
 use lsp_types::TextDocumentPositionParams;
 use serde::{Deserialize, Serialize};
 
@@ -27,19 +27,39 @@ macro_rules! build_completion {
     };
 }
 
-pub fn hx_completion(text_params: TextDocumentPositionParams) -> Option<&'static [HxCompletion]> {
-    let result = crate::tree_sitter::get_position_from_lsp_completion(text_params.clone())?;
+pub fn hx_completion(
+    text_params: TextDocumentPositionParams,
+) -> (
+    Option<&'static [HxCompletion]>,
+    Option<Vec<&'static [HxCompletion]>>,
+) {
+    let result = crate::tree_sitter::get_position_from_lsp_completion(text_params.clone());
     let ext_result = crate::tree_sitter::get_extension_completes(text_params.clone());
 
-    debug!(
+    error!(
         "result: {:?} ext_result: {:?} params: {:?}",
         result, ext_result, text_params
     );
 
-    match result {
-        Position::AttributeName(name) => name.starts_with("hx-").then_some(HX_TAGS),
-        Position::AttributeValue { name, .. } => HX_ATTRIBUTE_VALUES.get(&name).copied(),
-    }
+    let comp = match result {
+        Some(Position::AttributeName(name)) => name.starts_with("hx-").then_some(HX_TAGS),
+        Some(Position::AttributeValue { name, .. }) => HX_ATTRIBUTE_VALUES.get(&name).copied(),
+        None => None,
+    };
+
+    let ext_comp = match ext_result {
+        Some(exts) => {
+            let mut comps = Vec::new();
+            for ext in exts.iter() {
+                // add matching refs to extension completes to Vec
+                // once extension completes have been added
+            }
+            Some(comps)
+        }
+        None => None,
+    };
+
+    (comp, ext_comp)
 }
 
 pub fn hx_hover(text_params: TextDocumentPositionParams) -> Option<HxCompletion> {

@@ -11,8 +11,6 @@ use lsp_textdocument::FullTextDocument;
 use lsp_types::{TextDocumentContentChangeEvent, TextDocumentPositionParams};
 use once_cell::sync::Lazy;
 
-use crate::text_store::get_text_document;
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Position {
     AttributeName(String),
@@ -112,11 +110,6 @@ pub fn get_position_from_lsp_completion(
     text_params: TextDocumentPositionParams,
 ) -> Option<Position> {
     error!("get_position_from_lsp_completion");
-<<<<<<< HEAD
-=======
-    let text = get_text_document(&text_params.text_document.uri, None)?;
-    error!("get_position_from_lsp_completion: text {}", text);
->>>>>>> 7e32214 (Tree-sitter perf)
     let pos = text_params.position;
     error!("get_position_from_lsp_completion: pos {:?}", pos);
 
@@ -127,22 +120,12 @@ pub fn get_position_from_lsp_completion(
         .expect("text store mutex poisoned")
         .get_mut(text_params.text_document.uri.as_str())
     {
-<<<<<<< HEAD
         let text = entry.doc.get_content(None);
         entry.tree = entry.parser.parse(text, entry.tree.as_ref());
 
         if let Some(ref curr_tree) = entry.tree {
             let trigger_point = Point::new(pos.line as usize, pos.character as usize);
             return query_position(curr_tree.root_node(), text, trigger_point);
-=======
-        entry.tree = entry
-            .parser
-            .parse(entry.doc.get_content(None), entry.tree.as_ref());
-
-        if let Some(ref curr_tree) = entry.tree {
-            let trigger_point = Point::new(pos.line as usize, pos.character as usize);
-            return query_position(curr_tree.root_node(), text.as_str(), trigger_point);
->>>>>>> 7e32214 (Tree-sitter perf)
         }
     }
 
@@ -158,14 +141,13 @@ macro_rules! cursor_matches {
     }};
 }
 
-/// Returns a (potentially empty) Vec of extension tags the provided position is inside of
+/// Returns an Option<Vec<String>> of extension tags the provided position is inside of
 // Currently limited by tree-sitter's max depth of 12 levels, see https://github.com/tree-sitter/tree-sitter/issues/880
-pub fn get_extension_completes(text_params: TextDocumentPositionParams) -> Vec<String> {
+pub fn get_extension_completes(text_params: TextDocumentPositionParams) -> Option<Vec<String>> {
     static QUERY_HTMX_EXT: Lazy<Query> = Lazy::new(|| {
         tree_sitter::Query::new(
             tree_sitter_html::language(),
-            r#"
-(
+            r#"(
 	(element
         (start_tag
             (attribute
@@ -192,9 +174,10 @@ pub fn get_extension_completes(text_params: TextDocumentPositionParams) -> Vec<S
                 (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (attribute (attribute_name) @tag )))))))))))))
             ]
         )
-    ) @elem
+    )
 (#match? @hxext "hx-ext")
-)"#,
+)
+"#,
         )
         .unwrap()
     });
@@ -216,33 +199,33 @@ pub fn get_extension_completes(text_params: TextDocumentPositionParams) -> Vec<S
             .parse(entry.doc.get_content(None), entry.tree.as_ref());
 
         if let Some(ref curr_tree) = entry.tree {
-            let matches = cursor.matches(
-                &QUERY_HTMX_EXT,
-                curr_tree.root_node(),
-                entry.doc.get_content(None).as_bytes(),
-            );
-            for match_ in matches {
-                let caps = match_.captures;
-                let extension = caps[1]
-                    .node
-                    .utf8_text(entry.doc.get_content(None).as_bytes())
-                    .unwrap();
+            let text = entry.doc.get_content(None).as_bytes();
+            let matches = cursor.matches(&QUERY_HTMX_EXT, curr_tree.root_node(), text);
 
-                // skip @hxext and @extension, grab both @tag's if they're there
-                for cap in caps.iter().skip(2).take(2) {
-                    let cap_start = cap.node.range().start_point;
-                    let cap_end = cap.node.range().end_point;
-                    // if the cursor is current at a tag inside the extension's scope,
-                    // we need to add that extension's tags and attributes
-                    if cursor_matches!(cursor_line, cursor_char, cap_start, cap_end) {
-                        ext_tags.insert(extension.to_string());
+            for match_ in matches.into_iter() {
+                let caps = match_.captures;
+                if caps.len() < 3 {
+                    continue;
+                }
+
+                let ext_tag = caps[2].node;
+                let cap_start = ext_tag.range().start_point;
+                let cap_end = ext_tag.range().end_point;
+                if cursor_matches!(cursor_line, cursor_char, cap_start, cap_end) {
+                    if let Ok(ext) = caps[1].node.utf8_text(text) {
+                        debug!("get_extension_completes: Adding completes for {}", ext);
+                        ext_tags.insert(ext.replace('"', ""));
                     }
                 }
             }
         }
     }
 
-    ext_tags.into_iter().collect()
+    if ext_tags.is_empty() {
+        None
+    } else {
+        Some(ext_tags.into_iter().collect())
+    }
 }
 
 /// Convert an `lsp_types::TextDocumentContentChangeEvent` to a `tree_sitter::InputEdit`
